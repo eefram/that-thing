@@ -64,7 +64,7 @@ export default function Home() {
     setAuthError("");
     setAuthLoading(true);
     if (authMode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: "https://that-thing-ephraimavram07-2790s-projects.vercel.app" } });
       if (error) setAuthError(error.message);
       else setAuthError("Check your email to confirm your account!");
     } else {
