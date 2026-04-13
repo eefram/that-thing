@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
@@ -26,6 +28,55 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [newEventTitle, setNewEventTitle] = useState("");
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
+  const [user, setUser] = useState<User | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      loadEvents();
+      setShowAuth(false);
+    } else {
+      setEvents([]);
+    }
+  }, [user]);
+
+  const loadEvents = async () => {
+    const { data } = await supabase.from("events").select("*");
+    if (data) setEvents(data);
+  };
+
+  const handleAuth = async () => {
+    setAuthError("");
+    setAuthLoading(true);
+    if (authMode === "signup") {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setAuthError(error.message);
+      else setAuthError("Check your email to confirm your account!");
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setAuthError(error.message);
+    }
+    setAuthLoading(false);
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
 
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
@@ -46,14 +97,20 @@ export default function Home() {
   const isToday = (day: number) =>
     day === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
 
-  const addEvent = () => {
+  const addEvent = async () => {
     if (!newEventTitle.trim() || !selectedDate) return;
-    setEvents([...events, { id: crypto.randomUUID(), title: newEventTitle.trim(), date: selectedDate, color: selectedColor }]);
+    if (!user) { setShowAuth(true); setShowModal(false); return; }
+    const newEvent = { title: newEventTitle.trim(), date: selectedDate, color: selectedColor, user_id: user.id };
+    const { data, error } = await supabase.from("events").insert(newEvent).select().single();
+    if (!error && data) setEvents([...events, data]);
     setNewEventTitle("");
     setShowModal(false);
   };
 
-  const deleteEvent = (id: string) => setEvents(events.filter((e) => e.id !== id));
+  const deleteEvent = async (id: string) => {
+    await supabase.from("events").delete().eq("id", id);
+    setEvents(events.filter((e) => e.id !== id));
+  };
 
   const cells: (number | null)[] = [];
   for (let i = 0; i < firstDayOfMonth; i++) cells.push(null);
@@ -65,7 +122,18 @@ export default function Home() {
         <h1 className="text-2xl font-bold tracking-tight">
           that thing<span className="text-blue-500">.</span>
         </h1>
-        <span className="text-sm text-gray-500">your college life, organized</span>
+        <div className="flex items-center gap-4">
+          {user ? (
+            <>
+              <span className="text-sm text-gray-400">{user.email}</span>
+              <button onClick={handleSignOut} className="text-sm text-gray-400 hover:text-white transition">Sign out</button>
+            </>
+          ) : (
+            <button onClick={() => setShowAuth(true)} className="text-sm bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded-lg transition">
+              Sign in
+            </button>
+          )}
+        </div>
       </header>
 
       <main className="flex-1 p-6 max-w-5xl mx-auto w-full">
@@ -112,8 +180,15 @@ export default function Home() {
             );
           })}
         </div>
+
+        {!user && (
+          <p className="text-center text-gray-600 text-sm mt-8">
+            <button onClick={() => setShowAuth(true)} className="text-blue-500 hover:underline">Sign in</button> to save your events across devices.
+          </p>
+        )}
       </main>
 
+      {/* Add Event Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-xl">
@@ -141,6 +216,46 @@ export default function Home() {
               <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg border border-gray-700 text-sm hover:bg-gray-800 transition">Cancel</button>
               <button onClick={addEvent} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-sm font-medium transition">Add</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auth Modal */}
+      {showAuth && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-xl">
+            <h3 className="text-lg font-semibold mb-1">{authMode === "login" ? "Sign in" : "Create account"}</h3>
+            <p className="text-sm text-gray-400 mb-4">
+              {authMode === "login" ? "Welcome back to that thing." : "Join that thing. and organize your college life."}
+            </p>
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 mb-2"
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAuth()}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 mb-4"
+            />
+            {authError && <p className="text-sm text-red-400 mb-3">{authError}</p>}
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setShowAuth(false)} className="flex-1 py-2 rounded-lg border border-gray-700 text-sm hover:bg-gray-800 transition">Cancel</button>
+              <button onClick={handleAuth} disabled={authLoading} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-sm font-medium transition disabled:opacity-50">
+                {authLoading ? "..." : authMode === "login" ? "Sign in" : "Sign up"}
+              </button>
+            </div>
+            <p className="text-center text-sm text-gray-500">
+              {authMode === "login" ? "No account? " : "Already have one? "}
+              <button onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setAuthError(""); }} className="text-blue-400 hover:underline">
+                {authMode === "login" ? "Sign up" : "Sign in"}
+              </button>
+            </p>
           </div>
         </div>
       )}
