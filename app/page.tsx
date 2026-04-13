@@ -28,7 +28,7 @@ function UniversityInput({ value, onChange }: { value: string; onChange: (v: str
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(`http://universities.hipolabs.com/search?name=${encodeURIComponent(v)}&limit=8`);
+        const res = await fetch(`/api/universities?name=${encodeURIComponent(v)}`);
         const data = await res.json();
         setSuggestions(data.slice(0, 8));
         setOpen(data.length > 0);
