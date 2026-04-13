@@ -19,6 +19,8 @@ type Event = {
 
 const COLORS = ["bg-blue-500", "bg-purple-500", "bg-green-500", "bg-red-500", "bg-yellow-500", "bg-pink-500"];
 
+type DeleteStep = "idle" | "confirm" | "code";
+
 export default function Home() {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
@@ -35,6 +37,11 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<DeleteStep>("idle");
+  const [deleteCode, setDeleteCode] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -76,6 +83,53 @@ export default function Home() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+    setShowAccount(false);
+  };
+
+  // Step 1: user clicks "Delete Account" → send OTP to their email
+  const handleRequestDeleteCode = async () => {
+    if (!user?.email) return;
+    setDeleteLoading(true);
+    setDeleteError("");
+    const { error } = await supabase.auth.signInWithOtp({ email: user.email, options: { shouldCreateUser: false } });
+    if (error) setDeleteError(error.message);
+    else setDeleteStep("code");
+    setDeleteLoading(false);
+  };
+
+  // Step 2: user enters code → verify, then delete account + data
+  const handleConfirmDelete = async () => {
+    if (!user?.email || !deleteCode.trim()) return;
+    setDeleteLoading(true);
+    setDeleteError("");
+    const { error: verifyError } = await supabase.auth.verifyOtp({ email: user.email, token: deleteCode.trim(), type: "email" });
+    if (verifyError) {
+      setDeleteError("Invalid or expired code. Please try again.");
+      setDeleteLoading(false);
+      return;
+    }
+    const res = await fetch("/api/delete-account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: user.id }),
+    });
+    if (!res.ok) {
+      setDeleteError("Failed to delete account. Please try again.");
+      setDeleteLoading(false);
+      return;
+    }
+    await supabase.auth.signOut();
+    setShowAccount(false);
+    setDeleteStep("idle");
+    setDeleteCode("");
+    setDeleteLoading(false);
+  };
+
+  const closeAccount = () => {
+    setShowAccount(false);
+    setDeleteStep("idle");
+    setDeleteCode("");
+    setDeleteError("");
   };
 
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
@@ -125,7 +179,7 @@ export default function Home() {
         <div className="flex items-center gap-4">
           {user ? (
             <>
-              <span className="text-sm text-gray-400">{user.email}</span>
+              <button onClick={() => setShowAccount(true)} className="text-sm text-gray-400 hover:text-white transition">{user.email}</button>
               <button onClick={handleSignOut} className="text-sm text-gray-400 hover:text-white transition">Sign out</button>
             </>
           ) : (
@@ -256,6 +310,80 @@ export default function Home() {
                 {authMode === "login" ? "Sign up" : "Sign in"}
               </button>
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Account Modal */}
+      {showAccount && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-xl">
+            {deleteStep === "idle" && (
+              <>
+                <h3 className="text-lg font-semibold mb-1">Account</h3>
+                <p className="text-sm text-gray-400 mb-6">{user?.email}</p>
+                <div className="border-t border-gray-800 pt-4">
+                  <p className="text-sm text-gray-500 mb-3">Danger zone</p>
+                  <button
+                    onClick={() => setDeleteStep("confirm")}
+                    className="w-full py-2 rounded-lg border border-red-800 text-red-400 hover:bg-red-950 text-sm transition"
+                  >
+                    Delete account
+                  </button>
+                </div>
+                <button onClick={closeAccount} className="w-full mt-3 py-2 rounded-lg border border-gray-700 text-sm hover:bg-gray-800 transition">Close</button>
+              </>
+            )}
+
+            {deleteStep === "confirm" && (
+              <>
+                <h3 className="text-lg font-semibold mb-2">Delete account?</h3>
+                <p className="text-sm text-gray-400 mb-6">
+                  This will permanently delete your account and all your events. We&apos;ll send a confirmation code to <span className="text-white">{user?.email}</span>.
+                </p>
+                {deleteError && <p className="text-sm text-red-400 mb-3">{deleteError}</p>}
+                <div className="flex gap-2">
+                  <button onClick={closeAccount} className="flex-1 py-2 rounded-lg border border-gray-700 text-sm hover:bg-gray-800 transition">Cancel</button>
+                  <button
+                    onClick={handleRequestDeleteCode}
+                    disabled={deleteLoading}
+                    className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-medium transition disabled:opacity-50"
+                  >
+                    {deleteLoading ? "Sending..." : "Send code"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {deleteStep === "code" && (
+              <>
+                <h3 className="text-lg font-semibold mb-2">Enter confirmation code</h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  We sent a 6-digit code to <span className="text-white">{user?.email}</span>. Enter it below to permanently delete your account.
+                </p>
+                <input
+                  type="text"
+                  placeholder="000000"
+                  value={deleteCode}
+                  onChange={(e) => setDeleteCode(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleConfirmDelete()}
+                  maxLength={6}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-center tracking-widest focus:outline-none focus:border-red-500 mb-4"
+                  autoFocus
+                />
+                {deleteError && <p className="text-sm text-red-400 mb-3">{deleteError}</p>}
+                <div className="flex gap-2">
+                  <button onClick={closeAccount} className="flex-1 py-2 rounded-lg border border-gray-700 text-sm hover:bg-gray-800 transition">Cancel</button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    disabled={deleteLoading || deleteCode.length < 6}
+                    className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-medium transition disabled:opacity-50"
+                  >
+                    {deleteLoading ? "Deleting..." : "Delete forever"}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
