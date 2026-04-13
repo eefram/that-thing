@@ -1,8 +1,74 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import type { User } from "@supabase/supabase-js";
+
+type UniversitySuggestion = { name: string; country: string };
+
+function UniversityInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [suggestions, setSuggestions] = useState<UniversitySuggestion[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const handleChange = (v: string) => {
+    onChange(v);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!v.trim()) { setSuggestions([]); setOpen(false); return; }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`http://universities.hipolabs.com/search?name=${encodeURIComponent(v)}&limit=8`);
+        const data = await res.json();
+        setSuggestions(data.slice(0, 8));
+        setOpen(data.length > 0);
+      } catch { setSuggestions([]); }
+      setLoading(false);
+    }, 300);
+  };
+
+  const select = (name: string) => { onChange(name); setSuggestions([]); setOpen(false); };
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <input
+          type="text"
+          placeholder="University"
+          value={value}
+          onChange={(e) => handleChange(e.target.value)}
+          onFocus={() => suggestions.length > 0 && setOpen(true)}
+          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+        />
+        {loading && <span className="absolute right-3 top-2 text-gray-500 text-xs">...</span>}
+      </div>
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden shadow-xl max-h-48 overflow-y-auto">
+          {suggestions.map((s, i) => (
+            <li
+              key={i}
+              onMouseDown={() => select(s.name)}
+              className="px-3 py-2 text-sm cursor-pointer hover:bg-gray-700 flex items-center justify-between"
+            >
+              <span>{s.name}</span>
+              <span className="text-xs text-gray-500 ml-2 shrink-0">{s.country}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
@@ -357,7 +423,7 @@ export default function Home() {
               <input type="text" placeholder="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputClass} />
             </div>
             <input type="email" placeholder="School email" value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputClass} mb-2`} />
-            <input type="text" placeholder="University" value={university} onChange={(e) => setUniversity(e.target.value)} className={`${inputClass} mb-2`} />
+            <div className="mb-2"><UniversityInput value={university} onChange={setUniversity} /></div>
             <input type="tel" placeholder="Phone number (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} className={`${inputClass} mb-2`} />
             <input
               type="password"
