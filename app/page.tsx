@@ -39,7 +39,7 @@ export default function Home() {
   const [showAuth, setShowAuth] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const [deleteStep, setDeleteStep] = useState<DeleteStep>("idle");
-  const [deleteCode, setDeleteCode] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -86,25 +86,20 @@ export default function Home() {
     setShowAccount(false);
   };
 
-  // Step 1: user clicks "Delete Account" → send OTP to their email
-  const handleRequestDeleteCode = async () => {
-    if (!user?.email) return;
-    setDeleteLoading(true);
+  // Step 1: user clicks "Delete Account" → show password confirmation
+  const handleRequestDeleteCode = () => {
+    setDeleteStep("code");
     setDeleteError("");
-    const { error } = await supabase.auth.signInWithOtp({ email: user.email, options: { shouldCreateUser: false } });
-    if (error) setDeleteError(error.message);
-    else setDeleteStep("code");
-    setDeleteLoading(false);
   };
 
-  // Step 2: user enters code → verify, then delete account + data
+  // Step 2: user enters password → verify, then delete account + data
   const handleConfirmDelete = async () => {
-    if (!user?.email || !deleteCode.trim()) return;
+    if (!user?.email || !deletePassword.trim()) return;
     setDeleteLoading(true);
     setDeleteError("");
-    const { error: verifyError } = await supabase.auth.verifyOtp({ email: user.email, token: deleteCode.trim(), type: "email" });
+    const { error: verifyError } = await supabase.auth.signInWithPassword({ email: user.email, password: deletePassword });
     if (verifyError) {
-      setDeleteError("Invalid or expired code. Please try again.");
+      setDeleteError("Incorrect password. Please try again.");
       setDeleteLoading(false);
       return;
     }
@@ -121,14 +116,14 @@ export default function Home() {
     await supabase.auth.signOut();
     setShowAccount(false);
     setDeleteStep("idle");
-    setDeleteCode("");
+    setDeletePassword("");
     setDeleteLoading(false);
   };
 
   const closeAccount = () => {
     setShowAccount(false);
     setDeleteStep("idle");
-    setDeleteCode("");
+    setDeletePassword("");
     setDeleteError("");
   };
 
@@ -357,18 +352,17 @@ export default function Home() {
 
             {deleteStep === "code" && (
               <>
-                <h3 className="text-lg font-semibold mb-2">Enter confirmation code</h3>
+                <h3 className="text-lg font-semibold mb-2">Confirm with password</h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  We sent a 6-digit code to <span className="text-white">{user?.email}</span>. Enter it below to permanently delete your account.
+                  Enter your password to permanently delete your account and all your data.
                 </p>
                 <input
-                  type="text"
-                  placeholder="000000"
-                  value={deleteCode}
-                  onChange={(e) => setDeleteCode(e.target.value)}
+                  type="password"
+                  placeholder="Your password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleConfirmDelete()}
-                  maxLength={6}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-center tracking-widest focus:outline-none focus:border-red-500 mb-4"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500 mb-4"
                   autoFocus
                 />
                 {deleteError && <p className="text-sm text-red-400 mb-3">{deleteError}</p>}
@@ -376,7 +370,7 @@ export default function Home() {
                   <button onClick={closeAccount} className="flex-1 py-2 rounded-lg border border-gray-700 text-sm hover:bg-gray-800 transition">Cancel</button>
                   <button
                     onClick={handleConfirmDelete}
-                    disabled={deleteLoading || deleteCode.length < 6}
+                    disabled={deleteLoading || !deletePassword}
                     className="flex-1 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-sm font-medium transition disabled:opacity-50"
                   >
                     {deleteLoading ? "Deleting..." : "Delete forever"}
